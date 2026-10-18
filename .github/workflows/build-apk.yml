@@ -1,0 +1,46 @@
+
+name: Compilar FlowEdge APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar proyecto
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Buscar proyecto Android
+        run: |
+          find . -name gradlew -type f
+          find . -name settings.gradle.kts -type f
+
+      - name: Compilar APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlowEdge-APK
+          path: '**/build/outputs/apk/debug/*.apk'
+          if-no-files-found: error
