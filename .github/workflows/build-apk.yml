@@ -1,1 +1,85 @@
+name: Build FlowEdge APK
 
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**.zip'
+      - '.github/workflows/build-apk.yml'
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Locate project source (or extract uploaded ZIP)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$GITHUB_WORKSPACE/settings.gradle.kts" && -f "$GITHUB_WORKSPACE/app/build.gradle.kts" ]]; then
+            echo "PROJECT_DIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+            echo "Using Android project already at repository root."
+          else
+            mkdir -p "$GITHUB_WORKSPACE/_flowedge_source"
+            ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+            if [[ -z "${ZIP_FILE:-}" ]]; then
+              echo 'ERROR: No se encontró un proyecto Android en la raíz ni un archivo ZIP.'
+              echo 'Sube el ZIP de FlowEdge o los archivos del proyecto descomprimidos.'
+              exit 1
+            fi
+            echo "Extracting: $(basename "$ZIP_FILE")"
+            unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/_flowedge_source"
+            SETTINGS_FILE="$(find "$GITHUB_WORKSPACE/_flowedge_source" -type f -name settings.gradle.kts -print -quit)"
+            if [[ -z "${SETTINGS_FILE:-}" ]]; then
+              echo 'ERROR: El ZIP no contiene settings.gradle.kts.'
+              exit 1
+            fi
+            PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+            if [[ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]]; then
+              echo "ERROR: No se encontró app/build.gradle.kts en $PROJECT_DIR"
+              exit 1
+            fi
+            echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Android SDK platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Run unit tests
+        shell: bash
+        run: gradle --no-daemon -p "$PROJECT_DIR" testDebugUnitTest
+
+      - name: Build APK
+        shell: bash
+        run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlowEdge-debug-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
